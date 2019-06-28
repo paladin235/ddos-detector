@@ -5,9 +5,9 @@ where they are later processed to detect IP addresses of bots participating in t
 
 ## Local Setup (Linux)
 ### Prerequisites
+- Java 1.8+
 - Maven 3
 - Git 
-- Java 1.8+
 
 1. Clone this repo:
     ```bash
@@ -21,7 +21,7 @@ where they are later processed to detect IP addresses of bots participating in t
     ```bash
     tar -C $HOME -xzf kafka_2.12-2.3.0.tgz
     ```
-3. Change directory to the where you cloned the repo, then start kafka:
+3. Change directory to where you cloned the repo, then start kafka:
     ```bash
     ./start-kafka.sh
     ```
