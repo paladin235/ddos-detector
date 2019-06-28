@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.concurrent.ThreadSafe;
 import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -25,6 +26,9 @@ public class LogPublisher {
 
     private final Map<String, Object> kafkaConfig;
 
+    private AtomicInteger logMessagesPublished = new AtomicInteger();
+    private AtomicInteger logMessagesFailed = new AtomicInteger();
+
     public LogPublisher(Map<String, Object> kafkaConfig) {
         requireNonNull(kafkaConfig);
         this.kafkaConfig = ImmutableMap.copyOf(kafkaConfig);
@@ -34,6 +38,8 @@ public class LogPublisher {
         requireNonNull(reader);
         requireNonNull(topic);
         checkArgument(!topic.isEmpty(), "topic must not be empty");
+
+        logger.info("Publishing logs from {}", reader);
 
         try (Producer<String, String> producer = createProducer()) {
             String key = reader.source();
@@ -51,11 +57,19 @@ public class LogPublisher {
             }
 
         }
+        logger.info("Log messages published: {}", logMessagesPublished.get());
+        logger.info("Log messages failed: {}", logMessagesFailed.get());
     }
 
     private void onCompletion(RecordMetadata recordMetadata, Exception e) {
         if (e != null) {
             logger.warn("Failed to send record: {}", recordMetadata, e);
+            logMessagesFailed.incrementAndGet();
+        } else {
+            int count = logMessagesPublished.incrementAndGet();
+            if (count % 10000 == 0) {
+                logger.info("Published {} log messages", count);
+            }
         }
     }
 

@@ -56,4 +56,11 @@ public class GzipReader implements Reader {
             System.out.println(lines.count());
         }
     }
+
+    @Override
+    public String toString() {
+        return "GzipReader{" +
+                "file=" + file +
+                '}';
+    }
 }

@@ -3,6 +3,7 @@ package com.daniel;
 import com.google.common.collect.ImmutableMap;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,7 +24,8 @@ public class LogConsumer implements Iterator<ConsumerRecord<String, String>>, Au
     private final String topic;
 
     private Consumer<String, String> consumer;
-    private Iterator<ConsumerRecord<String, String>> records;
+    private Iterator<ConsumerRecord<String, String>> recordIterator;
+    private boolean closed;
 
     public LogConsumer(Map<String, Object> kafkaConfig, String topic) {
         requireNonNull(kafkaConfig);
@@ -37,20 +39,26 @@ public class LogConsumer implements Iterator<ConsumerRecord<String, String>>, Au
 
     @Override
     public boolean hasNext() {
+        if (closed) {
+            return false;
+        }
+
         if (consumer == null) {
             // first call, create consumer and subscribe
             consumer = createConsumer();
             consumer.subscribe(Collections.singleton(topic));
+            logger.info("Subscribed to topic: {}", topic);
         }
 
-        // TODO: fix this
-        if (records != null) {
-            return records.hasNext();
+        if (recordIterator != null && recordIterator.hasNext()) {
+            // continue to use existing iterator
+            return true;
         }
 
-
-        records = consumer.poll(Duration.ofMillis(100)).iterator();
-        boolean next = records.hasNext();
+        // try to retrieve more records
+        ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
+        recordIterator = records.iterator();
+        boolean next = recordIterator.hasNext();
         if (!next) {
             close();
         }
@@ -62,11 +70,12 @@ public class LogConsumer implements Iterator<ConsumerRecord<String, String>>, Au
         if (!hasNext()) {
             throw new NoSuchElementException("No more records for topic: " + topic);
         }
-        return records.next();
+        return recordIterator.next();
     }
 
     @Override
     public void close() {
+        closed = true;
         if (consumer != null) {
             consumer.close();
         }
