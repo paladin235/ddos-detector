@@ -26,6 +26,7 @@ public class LogConsumer implements Iterator<ConsumerRecord<String, String>>, Au
     private Consumer<String, String> consumer;
     private Iterator<ConsumerRecord<String, String>> recordIterator;
     private boolean closed;
+    private int count;
 
     public LogConsumer(Map<String, Object> kafkaConfig, String topic) {
         requireNonNull(kafkaConfig);
@@ -70,6 +71,7 @@ public class LogConsumer implements Iterator<ConsumerRecord<String, String>>, Au
         if (!hasNext()) {
             throw new NoSuchElementException("No more records for topic: " + topic);
         }
+        count++;
         return recordIterator.next();
     }
 
@@ -78,6 +80,8 @@ public class LogConsumer implements Iterator<ConsumerRecord<String, String>>, Au
         closed = true;
         if (consumer != null) {
             consumer.close();
+            consumer = null;
+            logger.info("Closed after reading {} records", count);
         }
     }
 }

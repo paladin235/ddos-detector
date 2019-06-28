@@ -35,7 +35,9 @@ public class DdosDetector {
         DdosDetector detector = new DdosDetector();
         detector.recreateTopic();
         detector.publishLog();
-        detector.processLog(2, Paths.get("/home/daniel/ddos-result/bot-ips.txt"));
+        Path outputFile = Paths.get("/home/daniel/ddos-result/bot-ips.txt");
+        Files.deleteIfExists((outputFile));
+        detector.processLog(2, outputFile);
     }
 
     private final String kafkaHost = "localhost:9092";
@@ -74,7 +76,7 @@ public class DdosDetector {
     }
 
 
-    private static final String IP_REGEX = "\\b(\\d{3}\\.\\d{3}\\.\\d{3}\\.\\d{3})\\b";
+    private static final String IP_REGEX = "\\b(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})\\b";
     private static final Pattern IP_PATTERN = Pattern.compile(IP_REGEX);
 
     public void processLog(double sensitivity, Path outputFile) throws IOException {
@@ -146,6 +148,7 @@ public class DdosDetector {
         Map<String, Integer> ipToCount = new HashMap<>();
 
         try (LogConsumer consumer = new LogConsumer(consumerConfig, APACHE_LOG_TOPIC)) {
+            int validIpsFound = 0;
             while (consumer.hasNext()) {
                 ConsumerRecord<String, String> record = consumer.next();
                 String line = record.value();
@@ -156,12 +159,15 @@ public class DdosDetector {
                     try {
                         InetAddress.getByName(potentialAddress);
                         ipToCount.merge(potentialAddress, 1, Integer::sum);
+                        validIpsFound++;
                         break;
                     } catch (UnknownHostException e) {
                         // the regex isn't exact, so some matches may fail
+                        logger.warn("Potential IP address invalid: {}", potentialAddress);
                     }
                 }
             }
+            logger.info("Messages containing a valid IP address: {}", validIpsFound);
         }
         return ipToCount;
     }
