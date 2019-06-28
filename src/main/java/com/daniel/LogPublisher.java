@@ -4,6 +4,7 @@ import com.google.common.collect.ImmutableMap;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -12,6 +13,7 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -28,19 +30,17 @@ public class LogPublisher {
         this.kafkaConfig = ImmutableMap.copyOf(kafkaConfig);
     }
 
-    public void process(Reader reader) throws IOException {
+    public void process(Reader reader, String topic) throws IOException {
         requireNonNull(reader);
+        requireNonNull(topic);
+        checkArgument(!topic.isEmpty(), "topic must not be empty");
 
         try (Producer<String, String> producer = createProducer()) {
             String key = reader.source();
             Stream<String> lines = reader.read();
             lines.parallel()
-                    .map(line -> new ProducerRecord<>("apache-log", key, line))
-                    .forEach(record -> producer.send(record, ((recordMetadata, e) -> {
-                        if (e != null) {
-                            logger.warn("Failed to send record: {}", recordMetadata, e);
-                        }
-                    })));
+                    .map(line -> new ProducerRecord<>(topic, key, line))
+                    .forEach(record -> producer.send(record, this::onCompletion));
         } catch (IOException e) {
             throw new IOException("Failed to process reader content", e);
         } finally {
@@ -50,6 +50,12 @@ public class LogPublisher {
                 logger.warn("Failed to close reader: {}", reader, e);
             }
 
+        }
+    }
+
+    private void onCompletion(RecordMetadata recordMetadata, Exception e) {
+        if (e != null) {
+            logger.warn("Failed to send record: {}", recordMetadata, e);
         }
     }
 
