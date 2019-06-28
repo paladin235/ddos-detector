@@ -66,7 +66,7 @@ public class LogConsumer implements Iterator<ConsumerRecord<String, String>>, Au
         }
 
         // try to retrieve more records
-        ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
+        ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(1000));
         recordIterator = records.iterator();
         boolean next = recordIterator.hasNext();
         if (!next) {

@@ -41,8 +41,10 @@ public class DdosDetector {
         }
         DdosDetector detector = new DdosDetector();
         detector.recreateTopic();
+
         Path inputFile = Paths.get(args[0]).toAbsolutePath();
         detector.publishLog(inputFile);
+
         Path outputFile = Paths.get(args[1]).toAbsolutePath();
         Files.deleteIfExists((outputFile));
         detector.analyzeLog(2, outputFile);
