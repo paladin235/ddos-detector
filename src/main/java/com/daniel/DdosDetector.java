@@ -36,11 +36,14 @@ public class DdosDetector {
     public static final String APACHE_LOG_TOPIC = "apache-log";
 
     public static void main(String[] args) throws Exception {
+        if (args.length != 2) {
+            throw new IllegalArgumentException("Expected exactly two arguments: inputFile outputFile");
+        }
         DdosDetector detector = new DdosDetector();
         detector.recreateTopic();
-        Path inputFile = Paths.get("src/main/resources/log/apache-access-log.txt.gz");
+        Path inputFile = Paths.get(args[0]).toAbsolutePath();
         detector.publishLog(inputFile);
-        Path outputFile = Paths.get("/home/daniel/ddos-result/bot-ips.txt");
+        Path outputFile = Paths.get(args[1]).toAbsolutePath();
         Files.deleteIfExists((outputFile));
         detector.analyzeLog(2, outputFile);
     }
