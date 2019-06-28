@@ -17,6 +17,9 @@ import java.util.NoSuchElementException;
 
 import static java.util.Objects.requireNonNull;
 
+/**
+ * <p>Consumes logs from a kafka topic.</p>
+ */
 @NotThreadSafe
 public class LogConsumer implements Iterator<ConsumerRecord<String, String>>, AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(LogConsumer.class);
@@ -28,6 +31,12 @@ public class LogConsumer implements Iterator<ConsumerRecord<String, String>>, Au
     private boolean closed;
     private int count;
 
+    /**
+     * Creates a consumer that will use the given kafka config and topic to consume log messages.
+     *
+     * @param kafkaConfig the kafka config to use to create the consumer
+     * @param topic       the topic to subscribe to
+     */
     public LogConsumer(Map<String, Object> kafkaConfig, String topic) {
         requireNonNull(kafkaConfig);
         this.kafkaConfig = ImmutableMap.copyOf(kafkaConfig);

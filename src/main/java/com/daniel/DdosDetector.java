@@ -18,14 +18,18 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.IntSummaryStatistics;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.google.common.base.Preconditions.checkArgument;
+import static java.util.Objects.requireNonNull;
+
+
+/**
+ * <p>Detects DDoS attacks by processing log messages from a kafka cluster.</p>
+ */
 public class DdosDetector {
     private static final Logger logger = LoggerFactory.getLogger(DdosDetector.class);
 
@@ -34,15 +38,16 @@ public class DdosDetector {
     public static void main(String[] args) throws Exception {
         DdosDetector detector = new DdosDetector();
         detector.recreateTopic();
-        detector.publishLog();
+        Path inputFile = Paths.get("src/main/resources/log/apache-access-log.txt.gz");
+        detector.publishLog(inputFile);
         Path outputFile = Paths.get("/home/daniel/ddos-result/bot-ips.txt");
         Files.deleteIfExists((outputFile));
-        detector.processLog(2, outputFile);
+        detector.analyzeLog(2, outputFile);
     }
 
     private final String kafkaHost = "localhost:9092";
 
-    public void recreateTopic() {
+    private void recreateTopic() {
         ImmutableMap<String, Object> adminConfig = ImmutableMap.<String, Object>builder()
                 .put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaHost)
                 .put(ProducerConfig.ACKS_CONFIG, "all")
@@ -56,7 +61,14 @@ public class DdosDetector {
         }
     }
 
-    public void publishLog() throws IOException {
+    /**
+     * <p>Publishes the log file to the kafka cluster.</p>
+     *
+     * @param file the log file to publish
+     * @throws IOException if there is a problem reading or publishing the log file
+     */
+    public void publishLog(Path file) throws IOException {
+        requireNonNull(file);
         ImmutableMap<String, Object> publisherConfig = ImmutableMap.<String, Object>builder()
                 .put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaHost)
                 .put(ProducerConfig.ACKS_CONFIG, "all")
@@ -69,7 +81,7 @@ public class DdosDetector {
                 .build();
         try {
             LogPublisher publisher = new LogPublisher(publisherConfig);
-            publisher.process(new GzipReader(Paths.get("src/main/resources/log/apache-access-log.txt.gz")), APACHE_LOG_TOPIC);
+            publisher.process(new GzipReader(file), APACHE_LOG_TOPIC);
         } catch (IOException e) {
             throw new IOException("Failed to publish logs", e);
         }
@@ -79,7 +91,20 @@ public class DdosDetector {
     private static final String IP_REGEX = "\\b(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})\\b";
     private static final Pattern IP_PATTERN = Pattern.compile(IP_REGEX);
 
-    public void processLog(double sensitivity, Path outputFile) throws IOException {
+    /**
+     * <p>Processes the log messages in the kafka cluster and writes suspected bot IP addresses to the given file.</p>
+     *
+     * <p>The sensitivity is multiplied by the
+     * standard deviation to calculate a threshold. Any IP addresses with the total number of requests above that
+     * threshold will be considered bots.</p>
+     *
+     * @param sensitivity the standard deviation multiplier, must be greater than 1
+     * @param outputFile  the output file where suspected bot IP addresses will be written, must not exist
+     * @throws IOException if outputFile already exists, or if it cannot be created
+     */
+    public void analyzeLog(double sensitivity, Path outputFile) throws IOException {
+        checkArgument(sensitivity > 1, "sensitivity must be greater than 1");
+        requireNonNull(outputFile);
         if (Files.exists(outputFile)) {
             throw new FileAlreadyExistsException("Output file already exists: " + outputFile);
         }
@@ -88,11 +113,11 @@ public class DdosDetector {
 
         Map<String, Integer> ipToCount = aggregateIpAddresses();
 
-        double stdDev = detectBots(ipToCount);
-        persistBotIps(sensitivity, outputFile, ipToCount, stdDev);
+        double threshold = calculateBotThreshold(sensitivity, ipToCount);
+        persistBotIps(threshold, ipToCount, outputFile);
     }
 
-    private double detectBots(Map<String, Integer> ipToCount) {
+    private double calculateBotThreshold(double sensitivity, Map<String, Integer> ipToCount) {
         IntSummaryStatistics stats = ipToCount.values().stream()
                 .mapToInt(Integer::intValue)
                 .summaryStatistics();
@@ -109,21 +134,23 @@ public class DdosDetector {
 
         double stdDev = Math.sqrt(variance);
 
+        logger.info("Total log messages processed: {}", sum);
         logger.info("Unique IP addresses found: {}", count);
-        logger.info("Total log messages read: {}", sum);
         logger.info("Average requests per IP: {}", avg);
         logger.info("Max requests for an IP: {}", max);
         logger.info("Variance in requests per IP: {}", variance);
         logger.info("Standard deviation in requests per IP: {}", stdDev);
-        return stdDev;
+        double threshold = stdDev * sensitivity;
+        logger.info("Bot detection request threshold: {}", threshold);
+        return threshold;
     }
 
-    private void persistBotIps(double sensitivity, Path outputFile, Map<String, Integer> ipToCount, double stdDev) throws IOException {
+    private void persistBotIps(double threshold, Map<String, Integer> ipToCount, Path outputFile) throws IOException {
         AtomicInteger suspectedBotnetCount = new AtomicInteger();
 
         try (PrintWriter writer = new PrintWriter(Files.newBufferedWriter(outputFile))) {
             ipToCount.entrySet().stream()
-                    .filter(entry -> entry.getValue() > stdDev * sensitivity)
+                    .filter(entry -> entry.getValue() > threshold)
                     .map(Map.Entry::getKey)
                     .peek(ip -> suspectedBotnetCount.incrementAndGet())
                     .forEach(writer::println);
@@ -150,25 +177,32 @@ public class DdosDetector {
         try (LogConsumer consumer = new LogConsumer(consumerConfig, APACHE_LOG_TOPIC)) {
             int validIpsFound = 0;
             while (consumer.hasNext()) {
-                ConsumerRecord<String, String> record = consumer.next();
-                String line = record.value();
-                Matcher matcher = IP_PATTERN.matcher(line);
-                while (matcher.find()) {
-                    // use first valid IP address
-                    String potentialAddress = matcher.group(0);
-                    try {
-                        InetAddress.getByName(potentialAddress);
-                        ipToCount.merge(potentialAddress, 1, Integer::sum);
-                        validIpsFound++;
-                        break;
-                    } catch (UnknownHostException e) {
-                        // the regex isn't exact, so some matches may fail
-                        logger.warn("Potential IP address invalid: {}", potentialAddress);
-                    }
+                Optional<String> optionalAddress = findIpAddress(ipToCount, consumer, validIpsFound);
+                if (optionalAddress.isPresent()) {
+                    ipToCount.merge(optionalAddress.get(), 1, Integer::sum);
+                    validIpsFound++;
                 }
             }
             logger.info("Messages containing a valid IP address: {}", validIpsFound);
         }
         return ipToCount;
+    }
+
+    private Optional<String> findIpAddress(Map<String, Integer> ipToCount, LogConsumer consumer, int validIpsFound) {
+        ConsumerRecord<String, String> record = consumer.next();
+        String line = record.value();
+        Matcher matcher = IP_PATTERN.matcher(line);
+        while (matcher.find()) {
+            // use first valid IP address
+            String potentialAddress = matcher.group(0);
+            try {
+                InetAddress.getByName(potentialAddress);
+                return Optional.of(potentialAddress);
+            } catch (UnknownHostException e) {
+                // the regex isn't exact, so some matches may fail
+                logger.warn("Potential IP address invalid: {}", potentialAddress);
+            }
+        }
+        return Optional.empty();
     }
 }

@@ -18,7 +18,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static java.util.Objects.requireNonNull;
 
 /**
- *
+ * <p>Publishes logs from a {@link Reader} to a kafka cluster. May be used concurrently with distinct readers.</p>
  */
 @ThreadSafe
 public class LogPublisher {
