@@ -11,9 +11,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.concurrent.ThreadSafe;
 import java.io.IOException;
 import java.util.Map;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Stream;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.util.Objects.requireNonNull;
@@ -30,11 +28,23 @@ public class LogPublisher {
     private AtomicInteger logMessagesPublished = new AtomicInteger();
     private AtomicInteger logMessagesFailed = new AtomicInteger();
 
+    /**
+     * Creates a new publisher with the given kafka config.
+     *
+     * @param kafkaConfig the kafka config
+     */
     public LogPublisher(Map<String, Object> kafkaConfig) {
         requireNonNull(kafkaConfig);
         this.kafkaConfig = ImmutableMap.copyOf(kafkaConfig);
     }
 
+    /**
+     * Processes the lines from the reader and publishes them to the topic.
+     *
+     * @param reader the reader, must not be null
+     * @param topic  the topic, must not be null or empty
+     * @throws IOException if there is a problem reading
+     */
     public void process(Reader reader, String topic) throws IOException {
         requireNonNull(reader);
         requireNonNull(topic);
@@ -42,29 +52,11 @@ public class LogPublisher {
 
         logger.info("Publishing logs from {}", reader);
 
-        int processors = Runtime.getRuntime().availableProcessors();
-        Semaphore semaphore = new Semaphore(processors * 8);
         try (Producer<String, String> producer = createProducer()) {
             String key = reader.source();
-            Stream<String> lines = reader.read();
-            lines.parallel()
+            reader.read()
                     .map(line -> new ProducerRecord<>(topic, key, line))
-                    .forEach(record -> {
-                        try {
-                            semaphore.acquire();
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            logger.error("Interrupted while trying to acquire semaphore");
-                            return;
-                        }
-                        producer.send(record, (recordMetadata, e) -> onCompletion(recordMetadata, e, semaphore));
-                    });
-            try {
-                semaphore.acquire(processors);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IOException("Interrupted while waiting for messages to be sent");
-            }
+                    .forEach(record -> producer.send(record, this::onCompletion));
         } catch (IOException e) {
             throw new IOException("Failed to process reader content", e);
         } finally {
@@ -79,19 +71,15 @@ public class LogPublisher {
         logger.info("Log messages failed: {}", logMessagesFailed.get());
     }
 
-    private void onCompletion(RecordMetadata recordMetadata, Exception e, Semaphore semaphore) {
-        try {
-            if (e != null) {
-                logger.warn("Failed to send record: {}", recordMetadata, e);
-                logMessagesFailed.incrementAndGet();
-            } else {
-                int count = logMessagesPublished.incrementAndGet();
-                if (count % 10000 == 0) {
-                    logger.info("Published {} log messages", count);
-                }
+    private void onCompletion(RecordMetadata recordMetadata, Exception e) {
+        if (e != null) {
+            logger.warn("Failed to send record: {}", recordMetadata, e);
+            logMessagesFailed.incrementAndGet();
+        } else {
+            int count = logMessagesPublished.incrementAndGet();
+            if (count % 10000 == 0) {
+                logger.info("Published {} log messages", count);
             }
-        } finally {
-            semaphore.release();
         }
     }
 
