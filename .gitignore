@@ -1,2 +1,4 @@
 results
 ddos-detector-1.0.0-SNAPSHOT-jar-with-dependencies.jar
+target
+.idea/workspace.xml
