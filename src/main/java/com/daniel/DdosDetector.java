@@ -184,9 +184,8 @@ public class DdosDetector {
                 long secondsElapsed = Duration.between(windowStart, timestamp).getSeconds();
                 if (secondsElapsed > slidingWindowSeconds) {
                     detectBotAddresses();
-                } else {
-                    ipToCount.merge(optionalAddress.get(), 1, Integer::sum);
                 }
+                ipToCount.merge(optionalAddress.get(), 1, Integer::sum);
             }
         }
     }
