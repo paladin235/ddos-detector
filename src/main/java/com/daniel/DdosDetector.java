@@ -176,7 +176,7 @@ public class DdosDetector {
 
                 Instant timestamp = optionalTimestamp.get();
                 if (windowStart == null) {
-                    // started a new window, so the timer should run when the
+                    // started a new window, so the timer should run
                     windowStart = timestamp;
                     createTimer();
                 }
