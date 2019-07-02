@@ -3,17 +3,16 @@ package com.daniel;
 import com.google.common.collect.ImmutableMap;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.NoSuchElementException;
 
 import static java.util.Objects.requireNonNull;
 
@@ -21,13 +20,13 @@ import static java.util.Objects.requireNonNull;
  * <p>Consumes logs from a kafka topic.</p>
  */
 @NotThreadSafe
-public class LogConsumer implements Iterator<ConsumerRecord<String, String>>, AutoCloseable {
+public class LogConsumer implements AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(LogConsumer.class);
     private final ImmutableMap<String, Object> kafkaConfig;
     private final String topic;
 
     private Consumer<String, String> consumer;
-    private Iterator<ConsumerRecord<String, String>> recordIterator;
+    private Iterator<ConsumerRecord<String, String>> recordIterator = Collections.emptyIterator();
     private boolean closed;
     private int count;
 
@@ -47,10 +46,16 @@ public class LogConsumer implements Iterator<ConsumerRecord<String, String>>, Au
         return new KafkaConsumer<>(kafkaConfig);
     }
 
-    @Override
-    public boolean hasNext() {
+    /**
+     * Polls for more records, waiting up to the given number of milliseconds if none are immediately available.
+     *
+     * @param ms the number of milliseconds to wait
+     * @return a record if available, null otherwise
+     */
+    public @Nullable
+    ConsumerRecord<String, String> poll(int ms) {
         if (closed) {
-            return false;
+            return null;
         }
 
         if (consumer == null) {
@@ -60,28 +65,30 @@ public class LogConsumer implements Iterator<ConsumerRecord<String, String>>, Au
             logger.info("Subscribed to topic: {}", topic);
         }
 
-        if (recordIterator != null && recordIterator.hasNext()) {
-            // continue to use existing iterator
-            return true;
+        if (!recordIterator.hasNext()) {
+            // try to retrieve more records
+            recordIterator = consumer.poll(Duration.ofMillis(ms)).iterator();
         }
 
-        // try to retrieve more records
-        ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(1000));
-        recordIterator = records.iterator();
-        boolean next = recordIterator.hasNext();
-        if (!next) {
-            close();
+        if (recordIterator.hasNext()) {
+            // found some records!
+            ConsumerRecord<String, String> next = recordIterator.next();
+            count++;
+            return next;
+        } else {
+            // still no records
+            return null;
         }
-        return next;
+
     }
 
-    @Override
-    public ConsumerRecord<String, String> next() {
-        if (!hasNext()) {
-            throw new NoSuchElementException("No more records for topic: " + topic);
-        }
-        count++;
-        return recordIterator.next();
+    /**
+     * Returns true if this consumer is closed, false otherwise.
+     *
+     * @return true if closed, false otherwise
+     */
+    public boolean isClosed() {
+        return closed;
     }
 
     @Override
