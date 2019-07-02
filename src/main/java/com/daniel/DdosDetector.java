@@ -142,8 +142,9 @@ public class DdosDetector {
      */
     public DdosDetector(double sensitivity, int slidingWindowSeconds, Path outputDirectory) {
         this.sensitivity = sensitivity;
+        checkArgument(sensitivity > 1, "sensitivity must be greater than 1");
         this.slidingWindowSeconds = slidingWindowSeconds;
-        this.outputDirectory = outputDirectory;
+        this.outputDirectory = requireNonNull(outputDirectory);
     }
 
     /**
@@ -156,8 +157,6 @@ public class DdosDetector {
      * @throws IOException if outputDirectory cannot be created or written to
      */
     public void analyzeLogs() throws IOException {
-        checkArgument(sensitivity > 1, "sensitivity must be greater than 1");
-        requireNonNull(outputDirectory);
         Files.createDirectories(outputDirectory);
 
         try (LogConsumer consumer = createConsumer()) {
